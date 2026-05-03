@@ -1,0 +1,421 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>QuillPilot Console</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Nunito+Sans:wght@400;600;700&family=Source+Code+Pro:wght@500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/static/styles.css" />
+    <script defer src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+    <script defer src="/static/app.js"></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark">QP</span>
+        <span>QuillPilot</span>
+      </div>
+      <nav class="nav-tabs" aria-label="Primary">
+        <a class="nav-item active" href="#home" data-i18n="nav.home">Home</a>
+        <a class="nav-item" href="#repository" data-i18n="nav.repository">Repository</a>
+        <a class="nav-item" href="#copilot" data-i18n="nav.copilot">Copilot</a>
+        <a class="nav-item" href="#settings" data-i18n="nav.settings">Settings</a>
+        <a class="nav-item" href="/docs" data-i18n="nav.api">API</a>
+      </nav>
+      <form class="global-search" id="global-search">
+        <i data-lucide="search"></i>
+        <input id="global-query" type="search" data-i18n-placeholder="search.global" placeholder="Search repository" autocomplete="off" />
+      </form>
+      <div class="org-block">
+        <span class="status-chip neutral" id="llm-status">LLM</span>
+        <span class="avatar">Q</span>
+      </div>
+    </header>
+
+    <main class="page-shell">
+      <section id="home" class="app-view active">
+        <section class="page-heading">
+          <div>
+            <p class="eyebrow" data-i18n="home.eyebrow">Local Academic Copilot</p>
+            <h1 data-i18n="home.title">Research Writing Console</h1>
+          </div>
+          <div class="heading-actions">
+            <button class="button secondary" id="refresh-health" type="button">
+              <i data-lucide="refresh-cw"></i>
+              <span data-i18n="action.refresh">Refresh</span>
+            </button>
+            <a class="button primary" href="/docs">
+              <i data-lucide="braces"></i>
+              <span data-i18n="action.apiDocs">API Docs</span>
+            </a>
+          </div>
+        </section>
+
+        <section class="metrics-grid" aria-label="Status metrics">
+          <article class="metric-card">
+            <span class="metric-label" data-i18n="metric.database">Database</span>
+            <strong class="metric-value compact" id="database-path">-</strong>
+          </article>
+          <article class="metric-card">
+            <span class="metric-label" data-i18n="metric.papers">Papers Imported</span>
+            <strong class="metric-value" id="papers-imported">0</strong>
+          </article>
+          <article class="metric-card">
+            <span class="metric-label" data-i18n="metric.bib">BibTeX Entries</span>
+            <strong class="metric-value" id="bib-imported">0</strong>
+          </article>
+          <article class="metric-card">
+            <span class="metric-label" data-i18n="metric.chunks">Chunks Indexed</span>
+            <strong class="metric-value" id="chunks-indexed">0</strong>
+          </article>
+        </section>
+      </section>
+
+      <section id="repository" class="app-view">
+        <section class="page-heading">
+          <div>
+            <p class="eyebrow" data-i18n="repository.eyebrow">Knowledge Base</p>
+            <h1 data-i18n="repository.title">Repository</h1>
+          </div>
+        </section>
+
+        <section class="workspace-grid">
+          <article class="panel import-panel">
+            <header class="panel-header">
+              <div>
+                <h2 data-i18n="repository.importTitle">Knowledge Base</h2>
+                <span class="panel-meta">PDF + BibTeX</span>
+              </div>
+              <span class="status-chip" id="import-state" data-i18n="state.ready">Ready</span>
+            </header>
+            <form class="panel-body form-stack" id="import-form">
+              <label class="field">
+                <span data-i18n="repository.pdfDir">PDF Directory</span>
+                <input id="pdf-dir" type="text" placeholder="F:\papers" />
+              </label>
+              <label class="field">
+                <span data-i18n="repository.bibFile">BibTeX File</span>
+                <input id="bib-file" type="text" placeholder="F:\papers\refs.bib" />
+              </label>
+              <button class="button primary full-width" type="submit">
+                <i data-lucide="database"></i>
+                <span data-i18n="repository.import">Import Library</span>
+              </button>
+            </form>
+          </article>
+
+          <article class="panel search-panel">
+            <header class="panel-header">
+              <div>
+                <h2 data-i18n="repository.searchTitle">Repository Search</h2>
+                <span class="panel-meta" id="search-count">0 results</span>
+              </div>
+              <button class="icon-button" id="clear-search" type="button" data-i18n-title="action.clearSearch" aria-label="Clear search" title="Clear search">
+                <i data-lucide="x"></i>
+              </button>
+            </header>
+            <div class="panel-body">
+              <form class="context-search" id="library-search">
+                <i data-lucide="search"></i>
+                <input id="search-query" type="search" data-i18n-placeholder="repository.searchPlaceholder" placeholder="Title, author, BibTeX key, or claim" />
+                <button class="button secondary compact" type="submit" data-i18n="action.search">Search</button>
+              </form>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th data-i18n="table.paper">Paper</th>
+                      <th data-i18n="table.key">Key</th>
+                      <th data-i18n="table.year">Year</th>
+                      <th class="number" data-i18n="table.score">Score</th>
+                    </tr>
+                  </thead>
+                  <tbody id="results-body">
+                    <tr>
+                      <td colspan="4" class="empty-row" data-i18n="repository.noSearch">No repository search has run.</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </article>
+        </section>
+      </section>
+
+      <section id="copilot" class="app-view">
+        <section class="page-heading">
+          <div>
+            <p class="eyebrow" data-i18n="copilot.eyebrow">Writing Workspace</p>
+            <h1 data-i18n="copilot.title">Copilot</h1>
+          </div>
+        </section>
+
+        <section class="copilot-grid">
+          <article class="panel read-panel">
+            <header class="panel-header">
+              <div>
+                <h2 data-i18n="copilot.reading">Reading</h2>
+                <span class="panel-meta" data-i18n="copilot.grounded">Grounded answer</span>
+              </div>
+              <span class="status-dot" id="read-dot"></span>
+            </header>
+            <form class="panel-body form-stack" id="read-form">
+              <label class="field">
+                <span data-i18n="copilot.question">Question</span>
+                <textarea id="read-question" rows="5" data-i18n-placeholder="copilot.questionPlaceholder" placeholder="What does this paper claim about retrieval?"></textarea>
+              </label>
+              <div class="inline-controls">
+                <label class="field compact-field">
+                  <span data-i18n="copilot.sources">Sources</span>
+                  <input id="read-top-k" type="number" min="1" max="20" value="6" />
+                </label>
+                <button class="button primary" type="submit">
+                  <i data-lucide="messages-square"></i>
+                  <span data-i18n="action.ask">Ask</span>
+                </button>
+              </div>
+            </form>
+            <div class="result-output" id="read-output">-</div>
+          </article>
+
+          <article class="panel write-panel">
+            <header class="panel-header">
+              <div>
+                <h2 data-i18n="copilot.writing">Writing</h2>
+                <span class="panel-meta" data-i18n="copilot.transform">Academic transform</span>
+              </div>
+              <div class="segmented" role="tablist" aria-label="Write action">
+                <button class="segment active" data-action="polish" type="button" data-i18n="write.polish">Polish</button>
+                <button class="segment" data-action="expand" type="button" data-i18n="write.expand">Expand</button>
+                <button class="segment" data-action="rewrite" type="button" data-i18n="write.rewrite">Rewrite</button>
+                <button class="segment" data-action="counterargument" type="button" data-i18n="write.challenge">Challenge</button>
+              </div>
+            </header>
+            <form class="panel-body form-stack" id="write-form">
+              <label class="field">
+                <span data-i18n="copilot.selectedText">Selected Text</span>
+                <textarea id="write-text" rows="6" data-i18n-placeholder="copilot.selectedPlaceholder" placeholder="Paste selected draft text"></textarea>
+              </label>
+              <label class="field">
+                <span data-i18n="copilot.context">Context</span>
+                <input id="write-context" type="text" data-i18n-placeholder="copilot.contextPlaceholder" placeholder="Section goal, audience, or target claim" />
+              </label>
+              <button class="button primary" type="submit">
+                <i data-lucide="wand-sparkles"></i>
+                <span data-i18n="action.run">Run</span>
+              </button>
+            </form>
+            <div class="result-output" id="write-output">-</div>
+          </article>
+
+          <article class="panel cite-panel">
+            <header class="panel-header">
+              <div>
+                <h2 data-i18n="copilot.citation">Citation</h2>
+                <span class="panel-meta">LaTeX/BibTeX</span>
+              </div>
+              <span class="status-chip neutral" id="cite-state" data-i18n="copilot.verifiedKeys">Verified keys</span>
+            </header>
+            <form class="panel-body form-stack" id="cite-form">
+              <label class="field">
+                <span data-i18n="copilot.lookup">Lookup</span>
+                <input id="cite-query" type="text" data-i18n-placeholder="copilot.lookupPlaceholder" placeholder="Paper title, author, claim, or BibTeX key" />
+              </label>
+              <div class="inline-controls">
+                <label class="field compact-field">
+                  <span data-i18n="copilot.style">Style</span>
+                  <select id="cite-style">
+                    <option value="cite">\cite{}</option>
+                    <option value="citep">\citep{}</option>
+                    <option value="citet">\citet{}</option>
+                  </select>
+                </label>
+                <button class="button primary" type="submit">
+                  <i data-lucide="quote"></i>
+                  <span data-i18n="action.insert">Insert</span>
+                </button>
+              </div>
+            </form>
+            <div class="result-output code-output" id="cite-output">-</div>
+          </article>
+        </section>
+      </section>
+
+      <section id="settings" class="app-view">
+        <div class="settings-shell">
+          <aside class="settings-sidebar" aria-label="Settings navigation">
+            <div class="settings-group-label" data-i18n="settings.desktop">Desktop</div>
+            <button class="settings-tab active" data-settings-page="general" type="button">
+              <i data-lucide="sliders-horizontal"></i>
+              <span data-i18n="settings.general">General</span>
+            </button>
+            <button class="settings-tab" data-settings-page="hotkeys" type="button">
+              <i data-lucide="keyboard"></i>
+              <span data-i18n="settings.hotkeys">Hotkeys</span>
+            </button>
+            <div class="settings-group-label" data-i18n="settings.server">Server</div>
+            <button class="settings-tab" data-settings-page="providers" type="button">
+              <i data-lucide="cpu"></i>
+              <span data-i18n="settings.providers">Providers</span>
+            </button>
+            <div class="settings-version">
+              <span>QuillPilot Desktop</span>
+              <span>v0.1.0</span>
+            </div>
+          </aside>
+
+          <div class="settings-content">
+            <section class="settings-page active" data-settings-page-panel="general">
+              <header class="settings-heading">
+                <h1 data-i18n="settings.general">General</h1>
+                <button class="button primary" id="save-general" type="button">
+                  <i data-lucide="save"></i>
+                  <span data-i18n="action.save">Save</span>
+                </button>
+              </header>
+              <div class="settings-card">
+                <div class="settings-row">
+                  <div>
+                    <h2 data-i18n="general.language">Language</h2>
+                    <p data-i18n="general.languageHelp">Change the display language.</p>
+                  </div>
+                  <select id="setting-language">
+                    <option value="zh-CN" data-i18n="language.zh">Simplified Chinese</option>
+                    <option value="en-US" data-i18n="language.en">English</option>
+                    <option value="fr-FR" data-i18n="language.fr">French</option>
+                  </select>
+                </div>
+                <div class="settings-row">
+                  <div>
+                    <h2 data-i18n="general.font">Font</h2>
+                    <p data-i18n="general.fontHelp">Font used for body text and controls.</p>
+                  </div>
+                  <select id="setting-font-family">
+                    <option value="Nunito Sans">Nunito Sans</option>
+                    <option value="Arial">Arial</option>
+                    <option value="Segoe UI">Segoe UI</option>
+                    <option value="Microsoft YaHei">Microsoft YaHei</option>
+                  </select>
+                </div>
+                <div class="settings-row">
+                  <div>
+                    <h2 data-i18n="general.codeFont">Code Font</h2>
+                    <p data-i18n="general.codeFontHelp">Used for BibTeX keys, LaTeX citations, and paths.</p>
+                  </div>
+                  <select id="setting-code-font-family">
+                    <option value="Source Code Pro">Source Code Pro</option>
+                    <option value="Consolas">Consolas</option>
+                    <option value="Cascadia Code">Cascadia Code</option>
+                  </select>
+                </div>
+                <div class="settings-row">
+                  <div>
+                    <h2 data-i18n="general.fontSize">Font Size</h2>
+                    <p data-i18n="general.fontSizeHelp">Controls the base UI font size.</p>
+                  </div>
+                  <input id="setting-font-size" class="settings-number" type="number" min="11" max="20" />
+                </div>
+                <div class="settings-row">
+                  <div>
+                    <h2 data-i18n="general.compact">Compact Layout</h2>
+                    <p data-i18n="general.compactHelp">Reduce spacing on data-dense pages.</p>
+                  </div>
+                  <label class="switch">
+                    <input id="setting-compact-mode" type="checkbox" />
+                    <span></span>
+                  </label>
+                </div>
+                <div class="settings-row">
+                  <div>
+                    <h2 data-i18n="general.progress">Show Progress Bar</h2>
+                    <p data-i18n="general.progressHelp">Show progress while the agent is working.</p>
+                  </div>
+                  <label class="switch">
+                    <input id="setting-show-progress" type="checkbox" />
+                    <span></span>
+                  </label>
+                </div>
+              </div>
+            </section>
+
+            <section class="settings-page" data-settings-page-panel="providers">
+              <header class="settings-heading">
+                <h1 data-i18n="providers.title">API Providers</h1>
+                <div class="heading-actions">
+                  <button class="button secondary" id="add-provider" type="button">
+                    <i data-lucide="plus"></i>
+                    <span data-i18n="action.add">Add</span>
+                  </button>
+                  <button class="button primary" id="save-providers" type="button">
+                    <i data-lucide="save"></i>
+                    <span data-i18n="action.save">Save</span>
+                  </button>
+                </div>
+              </header>
+              <div class="settings-card provider-card">
+                <div class="provider-toolbar">
+                  <div>
+                    <h2 data-i18n="providers.manage">Multi-API Management</h2>
+                    <p data-i18n="providers.help">Manage OpenAI-compatible APIs and local LLM endpoints.</p>
+                  </div>
+                  <span class="status-chip neutral" id="default-provider-label">Default</span>
+                </div>
+                <div id="provider-list" class="provider-list"></div>
+              </div>
+            </section>
+
+            <section class="settings-page" data-settings-page-panel="hotkeys">
+              <header class="settings-heading">
+                <h1 data-i18n="settings.hotkeys">Hotkeys</h1>
+                <button class="button primary" id="save-hotkeys" type="button">
+                  <i data-lucide="save"></i>
+                  <span data-i18n="action.save">Save</span>
+                </button>
+              </header>
+              <div class="settings-card">
+                <div class="settings-row">
+                  <div>
+                    <h2 data-i18n="hotkeys.enable">Enable Global Hotkeys</h2>
+                    <p data-i18n="hotkeys.enableHelp">The hotkey client reads this configuration on startup.</p>
+                  </div>
+                  <label class="switch">
+                    <input id="hotkey-enabled" type="checkbox" />
+                    <span></span>
+                  </label>
+                </div>
+                <div class="settings-row">
+                  <div>
+                    <h2 data-i18n="hotkeys.read">Reading Explanation</h2>
+                    <p data-i18n="hotkeys.readHelp">Read clipboard text and ask the repository.</p>
+                  </div>
+                  <input id="hotkey-read" class="hotkey-input" type="text" placeholder="ctrl+alt+r" />
+                </div>
+                <div class="settings-row">
+                  <div>
+                    <h2 data-i18n="hotkeys.write">Writing Assist</h2>
+                    <p data-i18n="hotkeys.writeHelp">Polish clipboard text academically.</p>
+                  </div>
+                  <input id="hotkey-write" class="hotkey-input" type="text" placeholder="ctrl+alt+w" />
+                </div>
+                <div class="settings-row">
+                  <div>
+                    <h2 data-i18n="hotkeys.cite">Citation Insert</h2>
+                    <p data-i18n="hotkeys.citeHelp">Find a BibTeX key and copy a LaTeX citation command.</p>
+                  </div>
+                  <input id="hotkey-cite" class="hotkey-input" type="text" placeholder="ctrl+alt+c" />
+                </div>
+              </div>
+            </section>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  </body>
+</html>
