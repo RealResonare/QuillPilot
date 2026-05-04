@@ -572,9 +572,15 @@ tbody tr:hover td {
 }
 
 .citation-candidates-heading span,
-.citation-candidate-meta {
+.citation-candidate-meta,
+.citation-candidate-reason {
   color: var(--text-secondary);
   font-size: 12px;
+}
+
+.citation-candidate-reason {
+  color: var(--success);
+  font-weight: 600;
 }
 
 .citation-candidate {

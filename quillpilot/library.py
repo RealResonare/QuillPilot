@@ -19,6 +19,10 @@ def _normalize(value: str | None) -> str:
     return re.sub(r"[^a-z0-9]+", "", value.lower())
 
 
+def _words(value: str | None) -> set[str]:
+    return {word.lower() for word in re.findall(r"[A-Za-z0-9]+", value or "")}
+
+
 def _fts_query(value: str) -> str:
     terms = re.findall(r"[\w-]+", value, flags=re.UNICODE)
     quoted_terms = []
@@ -34,6 +38,33 @@ def citation_command(key: str, style: str = "cite") -> str:
     if not re.match(r"^[A-Za-z0-9_:.\\/-]+$", key):
         raise ValueError("Invalid BibTeX key")
     return f"\\{style}{{{key}}}"
+
+
+def citation_rank(query: str | None, candidate: CitationCandidate) -> tuple[float, str]:
+    if not query:
+        return 1.0, "Imported BibTeX key"
+
+    query_norm = _normalize(query)
+    key_norm = _normalize(candidate.bibtex_key)
+    title_norm = _normalize(candidate.title)
+    query_words = _words(query)
+    author_words = _words(candidate.authors)
+
+    if query_norm and query_norm == key_norm:
+        return 100.0, "Exact BibTeX key match"
+    if query_norm and title_norm and query_norm == title_norm:
+        return 90.0, "Title match"
+    if query_norm and title_norm and (query_norm in title_norm or title_norm in query_norm):
+        return 80.0, "Title contains query"
+    if query_words and author_words and query_words.intersection(author_words):
+        return 70.0 + len(query_words.intersection(author_words)), "Author match"
+    if candidate.year and candidate.year in query:
+        return 60.0, "Year match"
+
+    score = keyword_score(query, candidate.title, candidate.authors, candidate.year, candidate.bibtex_key)
+    if score > 0:
+        return round(10.0 + score, 4), "Keyword match"
+    return 0.0, "No match"
 
 
 class LibraryService:
@@ -422,10 +453,17 @@ class LibraryService:
             )
             for row in rows
         ]
-        if query and not (paper_id or bibtex_key):
-            candidates.sort(
-                key=lambda item: keyword_score(query, item.title, item.authors, item.year, item.bibtex_key),
-                reverse=True,
-            )
-            candidates = [item for item in candidates if keyword_score(query, item.title, item.authors, item.year, item.bibtex_key) > 0]
+
+        ranked_candidates: list[CitationCandidate] = []
+        for candidate in candidates:
+            if paper_id and not (query or bibtex_key):
+                score, reason = 100.0, "Selected paper"
+            else:
+                score, reason = citation_rank(query or bibtex_key, candidate)
+            if query and not (paper_id or bibtex_key) and score <= 0:
+                continue
+            ranked_candidates.append(candidate.model_copy(update={"score": round(score, 4), "reason": reason}))
+
+        ranked_candidates.sort(key=lambda item: (-(item.score or 0.0), item.bibtex_key))
+        candidates = ranked_candidates
         return candidates[:limit]

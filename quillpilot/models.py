@@ -104,6 +104,8 @@ class CitationCandidate(BaseModel):
     title: str | None = None
     authors: str | None = None
     year: str | None = None
+    score: float | None = None
+    reason: str | None = None
 
 
 class CitationResponse(BaseModel):

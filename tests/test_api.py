@@ -133,10 +133,66 @@ def test_citation_candidates_require_explicit_choice(tmp_path: Path, monkeypatch
     assert candidates.status_code == 200
     assert candidates.json()["citation"] is None
     assert len(candidates.json()["candidates"]) == 2
+    assert candidates.json()["candidates"][0]["score"] is not None
+    assert candidates.json()["candidates"][0]["reason"] == "Title contains query"
 
     selected = client.post("/cite/insert", json={"bibtex_key": "chen2025retrieval", "style": "citep"})
     assert selected.status_code == 200
     assert selected.json()["citation"] == "\\citep{chen2025retrieval}"
+
+
+def test_citation_candidates_are_ranked_by_reliable_match(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("QUILLPILOT_DATA_DIR", str(tmp_path / "data"))
+    clear_api_caches()
+
+    bib = tmp_path / "refs.bib"
+    bib.write_text(
+        """
+@article{alpha2024generic,
+  title={A Generic Writing Assistant},
+  author={Rivera, Lee},
+  year={2024}
+}
+
+@article{beta2025retrieval,
+  title={Retrieval Grounded Citation Tools},
+  author={Chen, Bo},
+  year={2025}
+}
+
+@article{gamma2026retrieval,
+  title={Citation Workflows for Research},
+  author={Retrieval, Casey},
+  year={2026}
+}
+""".strip(),
+        encoding="utf-8",
+    )
+    client = TestClient(api.create_app())
+
+    imported = client.post("/library/import", json={"bib_file": str(bib)})
+    assert imported.status_code == 200
+
+    title_match = client.post("/cite/insert", json={"query": "Retrieval Grounded Citation Tools", "style": "cite"})
+    assert title_match.status_code == 200
+    assert title_match.json()["citation"] is None
+    assert title_match.json()["candidates"][0]["bibtex_key"] == "beta2025retrieval"
+    assert title_match.json()["candidates"][0]["reason"] == "Title match"
+
+    author_match = client.post("/cite/insert", json={"query": "Casey", "style": "cite"})
+    assert author_match.status_code == 200
+    assert author_match.json()["candidates"][0]["bibtex_key"] == "gamma2026retrieval"
+    assert author_match.json()["candidates"][0]["reason"] == "Author match"
+
+    year_match = client.post("/cite/insert", json={"query": "2024", "style": "cite"})
+    assert year_match.status_code == 200
+    assert year_match.json()["candidates"][0]["bibtex_key"] == "alpha2024generic"
+    assert year_match.json()["candidates"][0]["reason"] == "Year match"
+
+    exact_key = client.post("/cite/insert", json={"query": "beta2025retrieval", "style": "citet"})
+    assert exact_key.status_code == 200
+    assert exact_key.json()["citation"] == "\\citet{beta2025retrieval}"
+    assert exact_key.json()["candidates"][0]["reason"] == "Exact BibTeX key match"
 
 
 def test_settings_round_trip(tmp_path: Path, monkeypatch) -> None:
@@ -199,3 +255,4 @@ def test_ui_is_served(tmp_path: Path, monkeypatch) -> None:
     assert "renderCitationCandidates" in js.text
     assert "citation-candidate" in js.text
     assert "data-bibtex-key" in js.text
+    assert "citation-candidate-reason" in js.text

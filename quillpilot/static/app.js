@@ -545,7 +545,13 @@ function renderCitationText(value) {
 }
 
 function citationCandidateMeta(item) {
-  return [item.authors, item.year].filter(Boolean).join(" · ");
+  return [item.authors, item.year].filter(Boolean).join(" - ");
+}
+
+function citationCandidateReason(item) {
+  if (!item.reason && item.score == null) return "";
+  const score = item.score == null ? "" : ` (${Number(item.score).toFixed(2)})`;
+  return `${item.reason || "Match"}${score}`;
 }
 
 function renderCitationCandidates(payload) {
@@ -568,6 +574,7 @@ function renderCitationCandidates(payload) {
               <span class="citation-candidate-key">${escapeHtml(item.bibtex_key)}</span>
               <span class="citation-candidate-title">${escapeHtml(item.title || t("citation.untitled"))}</span>
               <span class="citation-candidate-meta">${escapeHtml(citationCandidateMeta(item) || "-")}</span>
+              <span class="citation-candidate-reason">${escapeHtml(citationCandidateReason(item))}</span>
             </button>
           `,
         )
