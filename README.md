@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-00A1E0.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.11%2B-032D60.svg)](pyproject.toml)
 [![FastAPI](https://img.shields.io/badge/FastAPI-Local%20API-04844B.svg)](quillpilot/api.py)
-[![Status](https://img.shields.io/badge/Status-v0.2%20development-FF9A3C.svg)](#roadmap)
+[![Status](https://img.shields.io/badge/Status-v0.2%20hardening-FF9A3C.svg)](#roadmap)
 
 **QuillPilot 是一个本地优先、编辑器无关的 AI 论文写作 Copilot。**
 
@@ -125,6 +125,12 @@ quillpilot-api
 http://127.0.0.1:8765/
 ```
 
+桌面托盘入口会自动启动本地 API，并提供打开控制台、启动/停止 hotkeys 和退出清理：
+
+```powershell
+quillpilot-tray
+```
+
 ## 配置模型
 
 QuillPilot 默认使用 OpenAI-compatible Chat Completions API。
@@ -242,6 +248,8 @@ Settings -> Hotkeys
 
 保存后需要重启 `quillpilot-hotkeys` 生效。
 
+当 API 请求失败、未找到可靠引用或命中多个引用候选时，hotkey 客户端不会覆盖当前剪贴板；请打开控制台选择候选或查看错误信息。
+
 ## 项目结构
 
 ```text
@@ -258,6 +266,7 @@ QuillPilot/
 │  ├─ models.py           # Pydantic request/response/settings models
 │  ├─ pdf.py              # PDF text extraction
 │  ├─ search.py           # Keyword search and optional Chroma adapter
+│  ├─ tray.py             # Windows-first desktop tray launcher
 │  ├─ user_settings.py    # Persisted app settings service
 │  └─ static/             # Web console UI
 ├─ tests/                 # Unit and API tests
@@ -312,7 +321,7 @@ python -m pip install -e . --dry-run
 | 阶段 | 目标 |
 | --- | --- |
 | v0.1 | 本地 API、PDF/BibTeX 导入、检索、写作辅助、引用插入、设置界面 |
-| v0.2 | 进行中：导入任务状态、真实库统计、FTS5 检索、本地 LLM provider 修正、source snippets 展示、引用候选选择与排序、文献去重；后续补 OCR |
+| v0.2 | 收口中：导入任务状态、真实库统计、FTS5 检索、可选向量检索、桌面托盘入口、本地 LLM provider 修正、source snippets 展示、引用候选选择与排序、文献去重；后续补 OCR |
 | v0.3 | VS Code / Word / TeXstudio 插件适配 |
 | v0.4 | 更完整的本地模型管理、embedding provider 管理 |
 | v0.5 | 项目级写作上下文、章节级大纲、审稿意见工作流 |

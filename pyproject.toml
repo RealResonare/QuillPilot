@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "quillpilot"
-version = "0.1.0"
+version = "0.2.0"
 description = "Local editor-agnostic AI copilot for academic writing with PDF/BibTeX knowledge base support."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -49,6 +49,7 @@ dev = [
 [project.scripts]
 quillpilot-api = "quillpilot.api:run"
 quillpilot-hotkeys = "quillpilot.hotkeys:main"
+quillpilot-tray = "quillpilot.tray:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

@@ -9,6 +9,10 @@ const state = {
 
 const ROUTES = ["home", "repository", "copilot", "settings"];
 
+if ("scrollRestoration" in history) {
+  history.scrollRestoration = "manual";
+}
+
 const I18N = {
   "zh-CN": {
     "app.title": "QuillPilot 控制台",
@@ -825,6 +829,8 @@ function syncRouteFromHash() {
       item.classList.toggle("active", item.getAttribute("href") === `#${activeRoute}`);
     }
   });
+  window.scrollTo(0, 0);
+  window.setTimeout(() => window.scrollTo(0, 0), 0);
 }
 
 function bindForms() {

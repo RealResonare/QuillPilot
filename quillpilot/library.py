@@ -350,11 +350,27 @@ class LibraryService:
         return len(rows_for_vector)
 
     def search(self, query: str, limit: int = 10, paper_ids: list[str] | None = None) -> list[SearchResult]:
-        fts_results = self._search_fts(query, limit, paper_ids)
-        if fts_results:
-            return fts_results
+        results: list[SearchResult] = []
+        seen_chunk_ids: set[str] = set()
 
-        return self._search_keywords(query, limit, paper_ids)
+        fts_results = self._search_fts(query, limit, paper_ids)
+        for result in fts_results:
+            if result.chunk_id:
+                seen_chunk_ids.add(result.chunk_id)
+            results.append(result)
+
+        if len(results) < limit:
+            vector_results = self._search_vector(query, limit - len(results), paper_ids, seen_chunk_ids)
+            for result in vector_results:
+                if result.chunk_id:
+                    seen_chunk_ids.add(result.chunk_id)
+                results.append(result)
+
+        if len(results) < limit:
+            keyword_results = self._search_keywords(query, limit - len(results), paper_ids, seen_chunk_ids)
+            results.extend(keyword_results)
+
+        return results[:limit]
 
     def _search_fts(self, query: str, limit: int, paper_ids: list[str] | None = None) -> list[SearchResult]:
         match_query = _fts_query(query)
@@ -398,7 +414,79 @@ class LibraryService:
             for row in rows
         ]
 
-    def _search_keywords(self, query: str, limit: int = 10, paper_ids: list[str] | None = None) -> list[SearchResult]:
+    def _search_vector(
+        self,
+        query: str,
+        limit: int,
+        paper_ids: list[str] | None = None,
+        excluded_chunk_ids: set[str] | None = None,
+    ) -> list[SearchResult]:
+        if not self.vector_index or limit <= 0:
+            return []
+        matches = self.vector_index.query_chunks(query, limit=limit, paper_ids=paper_ids)
+        if not matches:
+            return []
+
+        excluded = excluded_chunk_ids or set()
+        scores_by_chunk_id: dict[str, float] = {}
+        ordered_chunk_ids: list[str] = []
+        allowed_paper_ids = set(paper_ids or [])
+        for match in matches:
+            chunk_id = str(match.get("chunk_id") or "")
+            paper_id = str(match.get("paper_id") or "")
+            if not chunk_id or chunk_id in excluded:
+                continue
+            if allowed_paper_ids and paper_id not in allowed_paper_ids:
+                continue
+            distance = match.get("distance")
+            score = 0.5
+            if isinstance(distance, (int, float)):
+                score = 1 / (1 + max(float(distance), 0.0))
+            scores_by_chunk_id[chunk_id] = round(score, 4)
+            ordered_chunk_ids.append(chunk_id)
+
+        if not ordered_chunk_ids:
+            return []
+
+        placeholders = ",".join("?" for _ in ordered_chunk_ids)
+        with self.database.connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT c.id AS chunk_id, p.id AS paper_id, p.title, p.authors, p.year, p.bibtex_key, c.text
+                FROM chunks c
+                JOIN papers p ON p.id = c.paper_id
+                WHERE c.id IN ({placeholders})
+                """,
+                ordered_chunk_ids,
+            ).fetchall()
+
+        rows_by_chunk_id = {row["chunk_id"]: row for row in rows}
+        results: list[SearchResult] = []
+        for chunk_id in ordered_chunk_ids:
+            row = rows_by_chunk_id.get(chunk_id)
+            if not row:
+                continue
+            results.append(
+                SearchResult(
+                    paper_id=row["paper_id"],
+                    chunk_id=row["chunk_id"],
+                    title=row["title"],
+                    authors=row["authors"],
+                    year=row["year"],
+                    bibtex_key=row["bibtex_key"],
+                    snippet=snippet(row["text"], query),
+                    score=scores_by_chunk_id[chunk_id],
+                )
+            )
+        return results[:limit]
+
+    def _search_keywords(
+        self,
+        query: str,
+        limit: int = 10,
+        paper_ids: list[str] | None = None,
+        excluded_chunk_ids: set[str] | None = None,
+    ) -> list[SearchResult]:
         params: list[object] = []
         paper_filter = ""
         if paper_ids:
@@ -417,7 +505,10 @@ class LibraryService:
             ).fetchall()
 
         ranked: list[SearchResult] = []
+        excluded = excluded_chunk_ids or set()
         for row in rows:
+            if row["chunk_id"] in excluded:
+                continue
             score = keyword_score(query, row["title"], row["authors"], row["bibtex_key"], row["text"])
             if score <= 0:
                 continue

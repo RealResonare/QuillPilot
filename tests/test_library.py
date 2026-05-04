@@ -10,6 +10,18 @@ from quillpilot.db import Database
 from quillpilot.library import LibraryService, citation_command
 
 
+class FakeVectorIndex:
+    def __init__(self) -> None:
+        self.rows: list[dict[str, str]] = []
+
+    def upsert_chunks(self, chunks) -> None:
+        self.rows = list(chunks)
+
+    def query_chunks(self, query: str, limit: int = 10, paper_ids: list[str] | None = None) -> list[dict[str, object]]:
+        rows = [row for row in self.rows if not paper_ids or row["paper_id"] in paper_ids]
+        return [{"chunk_id": row["chunk_id"], "paper_id": row["paper_id"], "distance": 0.25} for row in rows[:limit]]
+
+
 def make_pdf(path: Path, text: str) -> None:
     c = canvas.Canvas(str(path))
     text_object = c.beginText(72, 760)
@@ -85,6 +97,25 @@ def test_import_pdf_bib_search_and_citation(tmp_path: Path) -> None:
     assert results[0].bibtex_key == "smith2024retrieval"
     assert candidates[0].bibtex_key == "smith2024retrieval"
     assert citation_command(candidates[0].bibtex_key, "citep") == "\\citep{smith2024retrieval}"
+
+
+def test_search_uses_vector_index_when_fts_has_no_match(tmp_path: Path) -> None:
+    pdf_dir = tmp_path / "pdfs"
+    pdf_dir.mkdir()
+    make_pdf(
+        pdf_dir / "notes2026workflow.pdf",
+        "Embodied note taking reduces cognitive load during literature synthesis.",
+    )
+    service = LibraryService(Database(tmp_path / "quillpilot.sqlite3"), FakeVectorIndex())
+
+    response = service.import_library(pdf_dir=str(pdf_dir))
+    results = service.search("conceptual similarity", limit=5)
+
+    assert response.chunks_indexed >= 1
+    assert results
+    assert results[0].title == "notes2026workflow"
+    assert "cognitive load" in results[0].snippet
+    assert results[0].score == 0.8
 
 
 def test_import_deduplicates_papers_by_bibtex_key_doi_and_title(tmp_path: Path) -> None:

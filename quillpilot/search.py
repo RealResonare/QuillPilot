@@ -31,10 +31,10 @@ class OptionalChromaIndex:
         self.collection = None
         try:
             import chromadb  # type: ignore
+            client = chromadb.PersistentClient(path=str(persist_dir))
+            self.collection = client.get_or_create_collection("quillpilot_chunks")
         except Exception:
             return
-        client = chromadb.PersistentClient(path=str(persist_dir))
-        self.collection = client.get_or_create_collection("quillpilot_chunks")
         self.enabled = True
 
     def upsert_chunks(self, chunks: Iterable[dict[str, str]]) -> None:
@@ -43,18 +43,52 @@ class OptionalChromaIndex:
         rows = list(chunks)
         if not rows:
             return
-        self.collection.upsert(
-            ids=[row["chunk_id"] for row in rows],
-            documents=[row["text"] for row in rows],
-            metadatas=[
+        try:
+            self.collection.upsert(
+                ids=[row["chunk_id"] for row in rows],
+                documents=[row["text"] for row in rows],
+                metadatas=[
+                    {
+                        "paper_id": row["paper_id"],
+                        "title": row.get("title") or "",
+                        "bibtex_key": row.get("bibtex_key") or "",
+                    }
+                    for row in rows
+                ],
+            )
+        except Exception:
+            return
+
+    def query_chunks(self, query: str, limit: int = 10, paper_ids: list[str] | None = None) -> list[dict[str, object]]:
+        if not self.enabled or self.collection is None or not query.strip():
+            return []
+        request: dict[str, object] = {
+            "query_texts": [query],
+            "n_results": limit,
+            "include": ["metadatas", "distances"],
+        }
+        if paper_ids:
+            request["where"] = {"paper_id": {"$in": paper_ids}}
+        try:
+            payload = self.collection.query(**request)
+        except Exception:
+            return []
+
+        ids = (payload.get("ids") or [[]])[0]
+        metadatas = (payload.get("metadatas") or [[]])[0]
+        distances = (payload.get("distances") or [[]])[0]
+        results: list[dict[str, object]] = []
+        for index, chunk_id in enumerate(ids):
+            metadata = metadatas[index] if index < len(metadatas) and metadatas[index] else {}
+            distance = distances[index] if index < len(distances) else None
+            results.append(
                 {
-                    "paper_id": row["paper_id"],
-                    "title": row.get("title") or "",
-                    "bibtex_key": row.get("bibtex_key") or "",
+                    "chunk_id": chunk_id,
+                    "paper_id": metadata.get("paper_id"),
+                    "distance": distance,
                 }
-                for row in rows
-            ],
-        )
+            )
+        return results
 
 
 def keyword_score(query: str, *fields: str | None) -> float:

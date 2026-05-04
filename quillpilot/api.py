@@ -59,7 +59,7 @@ def llm_provider() -> LLMProvider:
 def create_app() -> FastAPI:
     app = FastAPI(
         title="QuillPilot Local API",
-        version="0.1.0",
+        version="0.2.0",
         description="Editor-agnostic local AI copilot for academic writing.",
     )
     static_dir = Path(__file__).parent / "static"

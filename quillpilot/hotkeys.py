@@ -19,6 +19,12 @@ class HotkeyConfig:
     cite: str = "ctrl+alt+c"
 
 
+@dataclass(frozen=True)
+class HotkeyResult:
+    text: str
+    copy_to_clipboard: bool = True
+
+
 def _require_desktop_modules():
     try:
         import keyboard  # type: ignore
@@ -28,24 +34,32 @@ def _require_desktop_modules():
     return keyboard, pyperclip
 
 
-def call_api(config: HotkeyConfig, path: str, payload: dict[str, object]) -> str:
-    with httpx.Client(timeout=60) as client:
-        response = client.post(config.api_url.rstrip("/") + path, json=payload)
-        response.raise_for_status()
-        data = response.json()
+def result_from_payload(data: dict[str, object]) -> HotkeyResult:
     if "result" in data:
-        return str(data["result"])
+        return HotkeyResult(str(data["result"]))
     if "answer" in data:
-        return str(data["answer"])
+        return HotkeyResult(str(data["answer"]))
     if data.get("citation"):
-        return str(data["citation"])
+        return HotkeyResult(str(data["citation"]))
     candidates = data.get("candidates") or []
     if candidates:
         lines = ["Multiple citation candidates:"]
         for item in candidates:
             lines.append(f"- {item.get('bibtex_key')}: {item.get('title') or 'Untitled'}")
-        return "\n".join(lines)
-    return str(data.get("message") or data)
+        lines.append("Open the QuillPilot console to choose one; clipboard was left unchanged.")
+        return HotkeyResult("\n".join(lines), copy_to_clipboard=False)
+    return HotkeyResult(str(data.get("message") or data), copy_to_clipboard=False)
+
+
+def call_api(config: HotkeyConfig, path: str, payload: dict[str, object]) -> HotkeyResult:
+    try:
+        with httpx.Client(timeout=60) as client:
+            response = client.post(config.api_url.rstrip("/") + path, json=payload)
+            response.raise_for_status()
+            data = response.json()
+    except httpx.HTTPError as exc:
+        return HotkeyResult(f"QuillPilot request failed: {exc}", copy_to_clipboard=False)
+    return result_from_payload(data)
 
 
 def load_hotkey_config(api_url: str) -> HotkeyConfig:
@@ -80,20 +94,30 @@ def install_hotkeys(config: HotkeyConfig) -> None:
     def write_clipboard(text: str) -> None:
         pyperclip.copy(text)
 
-    def explain() -> None:
+    def run_clipboard_action(path: str, payload: dict[str, object]) -> None:
         text = read_clipboard()
-        if text:
-            write_clipboard(call_api(config, "/read/ask", {"question": text, "top_k": 6}))
+        if not text:
+            return
+        if path == "/write/assist":
+            request_payload = payload | {"text": text}
+        elif path == "/read/ask":
+            request_payload = payload | {"question": text}
+        else:
+            request_payload = payload | {"query": text}
+        result = call_api(config, path, request_payload)
+        if result.copy_to_clipboard:
+            write_clipboard(result.text)
+        else:
+            print(result.text, file=sys.stderr)
+
+    def explain() -> None:
+        run_clipboard_action("/read/ask", {"top_k": 6})
 
     def write() -> None:
-        text = read_clipboard()
-        if text:
-            write_clipboard(call_api(config, "/write/assist", {"text": text, "action": "polish", "top_k": 4}))
+        run_clipboard_action("/write/assist", {"action": "polish", "top_k": 4})
 
     def cite() -> None:
-        text = read_clipboard()
-        if text:
-            write_clipboard(call_api(config, "/cite/insert", {"query": text, "style": "cite", "top_k": 5}))
+        run_clipboard_action("/cite/insert", {"style": "cite", "top_k": 5})
 
     keyboard.add_hotkey(config.read, explain)
     keyboard.add_hotkey(config.write, write)
