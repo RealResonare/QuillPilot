@@ -102,6 +102,43 @@ def test_import_task_records_result(tmp_path: Path, monkeypatch) -> None:
     assert fetched.json()["result"]["papers_imported"] == 1
 
 
+def test_citation_candidates_require_explicit_choice(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("QUILLPILOT_DATA_DIR", str(tmp_path / "data"))
+    clear_api_caches()
+
+    bib = tmp_path / "refs.bib"
+    bib.write_text(
+        """
+@article{smith2024retrieval,
+  title={Retrieval Augmented Academic Writing},
+  author={Smith, Ada},
+  year={2024}
+}
+
+@article{chen2025retrieval,
+  title={Retrieval Grounded Citation Tools},
+  author={Chen, Bo},
+  year={2025}
+}
+""".strip(),
+        encoding="utf-8",
+    )
+    client = TestClient(api.create_app())
+
+    imported = client.post("/library/import", json={"bib_file": str(bib)})
+    assert imported.status_code == 200
+    assert imported.json()["bib_entries_imported"] == 2
+
+    candidates = client.post("/cite/insert", json={"query": "retrieval", "style": "citep"})
+    assert candidates.status_code == 200
+    assert candidates.json()["citation"] is None
+    assert len(candidates.json()["candidates"]) == 2
+
+    selected = client.post("/cite/insert", json={"bibtex_key": "chen2025retrieval", "style": "citep"})
+    assert selected.status_code == 200
+    assert selected.json()["citation"] == "\\citep{chen2025retrieval}"
+
+
 def test_settings_round_trip(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("QUILLPILOT_DATA_DIR", str(tmp_path / "data"))
     clear_api_caches()
@@ -155,6 +192,10 @@ def test_ui_is_served(tmp_path: Path, monkeypatch) -> None:
     assert css.status_code == 200
     assert ".app-view.active" in css.text
     assert "--primary: #00a1e0" in css.text
+    assert ".citation-candidate" in css.text
     assert js.status_code == 200
     assert "const I18N" in js.text
     assert "syncRouteFromHash" in js.text
+    assert "renderCitationCandidates" in js.text
+    assert "citation-candidate" in js.text
+    assert "data-bibtex-key" in js.text

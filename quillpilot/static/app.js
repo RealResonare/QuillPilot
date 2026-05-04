@@ -127,6 +127,8 @@ const I18N = {
     "toast.providersSaved": "API 提供商已保存。",
     "toast.hotkeysSaved": "快捷键设置已保存。重启 hotkey 客户端后生效。",
     "citation.multiple": "找到多个引用候选:",
+    "citation.choose": "请选择一条候选引用。",
+    "citation.none": "没有找到可靠的 BibTeX key。",
     "citation.untitled": "未命名",
   },
   "en-US": {
@@ -246,6 +248,8 @@ const I18N = {
     "toast.providersSaved": "API providers saved.",
     "toast.hotkeysSaved": "Hotkey settings saved. Restart the hotkey client to apply them.",
     "citation.multiple": "Multiple citation candidates:",
+    "citation.choose": "Choose a candidate citation.",
+    "citation.none": "No reliable BibTeX key found.",
     "citation.untitled": "Untitled",
   },
   "fr-FR": {
@@ -365,6 +369,8 @@ const I18N = {
     "toast.providersSaved": "Fournisseurs API enregistres.",
     "toast.hotkeysSaved": "Raccourcis enregistres. Redemarrez le client de raccourcis.",
     "citation.multiple": "Plusieurs citations candidates:",
+    "citation.choose": "Choisissez une citation candidate.",
+    "citation.none": "Aucune cle BibTeX fiable trouvee.",
     "citation.untitled": "Sans titre",
   },
 };
@@ -532,6 +538,56 @@ function formatSources(sources = []) {
     return `[${index + 1}] ${source.title || "-"}${key}\n${source.snippet || ""}`;
   });
   return `\n\n${t("copilot.sources")}:\n${lines.join("\n\n")}`;
+}
+
+function renderCitationText(value) {
+  $("#cite-output").textContent = value || "-";
+}
+
+function citationCandidateMeta(item) {
+  return [item.authors, item.year].filter(Boolean).join(" · ");
+}
+
+function renderCitationCandidates(payload) {
+  const candidates = payload.candidates || [];
+  const output = $("#cite-output");
+  if (!candidates.length) {
+    renderCitationText(payload.message || t("citation.none"));
+    return;
+  }
+  output.innerHTML = `
+    <div class="citation-candidates" data-citation-candidates>
+      <div class="citation-candidates-heading">
+        <strong>${escapeHtml(payload.message || t("citation.multiple"))}</strong>
+        <span>${escapeHtml(t("citation.choose"))}</span>
+      </div>
+      ${candidates
+        .map(
+          (item) => `
+            <button class="citation-candidate" type="button" data-bibtex-key="${escapeHtml(item.bibtex_key)}">
+              <span class="citation-candidate-key">${escapeHtml(item.bibtex_key)}</span>
+              <span class="citation-candidate-title">${escapeHtml(item.title || t("citation.untitled"))}</span>
+              <span class="citation-candidate-meta">${escapeHtml(citationCandidateMeta(item) || "-")}</span>
+            </button>
+          `,
+        )
+        .join("")}
+    </div>
+  `;
+}
+
+async function insertCitationByKey(bibtexKey) {
+  renderCitationText(t("state.loading"));
+  const payload = await request("/cite/insert", {
+    method: "POST",
+    body: JSON.stringify({ bibtex_key: bibtexKey, style: $("#cite-style").value, top_k: 1 }),
+  });
+  if (payload.citation) {
+    renderCitationText(payload.citation);
+    await navigator.clipboard?.writeText(payload.citation).catch(() => undefined);
+    return;
+  }
+  renderCitationCandidates(payload);
 }
 
 function applyGeneralSettings(general) {
@@ -869,24 +925,27 @@ function bindForms() {
     event.preventDefault();
     const query = $("#cite-query").value.trim();
     if (!query) return;
-    $("#cite-output").textContent = t("state.loading");
+    renderCitationText(t("state.loading"));
     try {
       const payload = await request("/cite/insert", {
         method: "POST",
         body: JSON.stringify({ query, style: $("#cite-style").value, top_k: 5 }),
       });
       if (payload.citation) {
-        $("#cite-output").textContent = payload.citation;
+        renderCitationText(payload.citation);
         await navigator.clipboard?.writeText(payload.citation).catch(() => undefined);
       } else {
-        $("#cite-output").textContent = [
-          payload.message || t("citation.multiple"),
-          ...(payload.candidates || []).map((item) => `${item.bibtex_key} - ${item.title || t("citation.untitled")}`),
-        ].join("\n");
+        renderCitationCandidates(payload);
       }
     } catch (error) {
-      $("#cite-output").textContent = error.message;
+      renderCitationText(error.message);
     }
+  });
+
+  $("#cite-output").addEventListener("click", (event) => {
+    const candidate = event.target.closest(".citation-candidate");
+    if (!candidate) return;
+    insertCitationByKey(candidate.dataset.bibtexKey).catch((error) => renderCitationText(error.message));
   });
 }
 
