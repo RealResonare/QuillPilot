@@ -36,6 +36,8 @@ PDF + BibTeX -> Repository -> Reading -> Writing -> Citation
     - [测试要求](#测试要求)
   - [Roadmap](#roadmap)
   - [开发与测试](#开发与测试)
+  - [发布前检查](#发布前检查)
+  - [贡献与本地文件](#贡献与本地文件)
   - [许可证](#许可证)
 
 ## 核心定位
@@ -104,13 +106,13 @@ python -m venv .venv
 ### 2. 安装依赖
 
 ```powershell
-pip install -e .[dev,desktop]
+python -m pip install -e .[dev,desktop]
 ```
 
 可选向量检索后端：
 
 ```powershell
-pip install -e .[vector]
+python -m pip install -e .[vector]
 ```
 
 ### 3. 启动服务
@@ -312,7 +314,7 @@ QuillPilot/
 - 发布前必须运行：
 
 ```powershell
-pytest
+python -m pytest
 python -m pip install -e . --dry-run
 ```
 
@@ -321,7 +323,7 @@ python -m pip install -e . --dry-run
 | 阶段 | 目标 |
 | --- | --- |
 | v0.1 | 本地 API、PDF/BibTeX 导入、检索、写作辅助、引用插入、设置界面 |
-| v0.2 | 收口中：导入任务状态、真实库统计、FTS5 检索、可选向量检索、桌面托盘入口、本地 LLM provider 修正、source snippets 展示、引用候选选择与排序、文献去重；后续补 OCR |
+| v0.2 | 发布面收口：导入任务状态、真实库统计、FTS5 检索、可选向量检索、桌面托盘入口、本地 LLM provider 修正、source snippets 展示、引用候选选择与排序、文献去重；OCR 仍未实现 |
 | v0.3 | VS Code / Word / TeXstudio 插件适配 |
 | v0.4 | 更完整的本地模型管理、embedding provider 管理 |
 | v0.5 | 项目级写作上下文、章节级大纲、审稿意见工作流 |
@@ -331,8 +333,10 @@ python -m pip install -e . --dry-run
 运行测试：
 
 ```powershell
-pytest
+python -m pytest
 ```
+
+在部分 Windows PowerShell 环境里，裸 `pytest` 可能不在 PATH；统一使用 `python -m pytest` 可以确保命令来自当前虚拟环境。
 
 检查前端静态脚本语法：
 
@@ -351,6 +355,45 @@ python -m uvicorn quillpilot.api:app --host 127.0.0.1 --port 8765
 ```powershell
 python -m pip install -e . --dry-run
 ```
+
+查看中文文档时建议显式指定 UTF-8，避免旧版 PowerShell 或控制台代码页把中文显示成乱码：
+
+```powershell
+Get-Content README.md -Encoding UTF8 -TotalCount 40
+```
+
+## 发布前检查
+
+v0.2 hardening 发布前按以下顺序做一次干净验证：
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -e .[dev,desktop]
+python -m pytest
+quillpilot-api
+```
+
+启动后打开：
+
+```text
+http://127.0.0.1:8765/
+http://127.0.0.1:8765/health
+http://127.0.0.1:8765/docs
+```
+
+若要验证文档编码，可对比默认读取和 UTF-8 读取的输出：
+
+```powershell
+Get-Content README.md -TotalCount 40
+Get-Content README.md -Encoding UTF8 -TotalCount 40
+```
+
+## 贡献与本地文件
+
+- 文档和源码统一使用 UTF-8；编辑器设置见 `.editorconfig`。
+- 不提交本地运行产物：`.pytest_cache/`、`__pycache__/`、`*.egg-info/`、`.quillpilot/`、`build/`、`dist/`。
+- 提交前至少运行 `python -m pytest`；修改前端静态脚本时额外运行 `node --check quillpilot\static\app.js`。
 
 ## 许可证
 
