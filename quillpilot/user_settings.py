@@ -110,12 +110,14 @@ class SettingsService:
                 api_key=provider.api_key or None,
                 base_url=provider.base_url,
                 model=provider.model,
+                requires_api_key=provider.kind == "api",
                 timeout_seconds=self.config.llm_timeout_seconds,
             )
         return LLMConfig(
             api_key=self.config.llm_api_key,
             base_url=self.config.llm_base_url,
             model=self.config.llm_model,
+            requires_api_key=True,
             timeout_seconds=self.config.llm_timeout_seconds,
         )
 

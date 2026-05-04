@@ -13,6 +13,7 @@ class LLMConfig:
     api_key: str | None
     base_url: str
     model: str
+    requires_api_key: bool = True
     timeout_seconds: float = 45
 
 
@@ -21,7 +22,7 @@ class LLMProvider:
         self.config = config
 
     def complete(self, system: str, user: str) -> str:
-        if not self.config.api_key:
+        if self.config.requires_api_key and not self.config.api_key:
             return self._offline_response(user)
 
         endpoint = self.config.base_url.rstrip("/") + "/chat/completions"
@@ -33,10 +34,9 @@ class LLMProvider:
             ],
             "temperature": 0.2,
         }
-        headers = {
-            "Authorization": f"Bearer {self.config.api_key}",
-            "Content-Type": "application/json",
-        }
+        headers = {"Content-Type": "application/json"}
+        if self.config.api_key:
+            headers["Authorization"] = f"Bearer {self.config.api_key}"
         try:
             with httpx.Client(timeout=self.config.timeout_seconds) as client:
                 response = client.post(endpoint, headers=headers, json=payload)

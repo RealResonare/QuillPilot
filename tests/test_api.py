@@ -54,6 +54,16 @@ def test_api_import_search_read_write_and_cite(tmp_path: Path, monkeypatch) -> N
     assert imported.status_code == 200
     assert imported.json()["papers_imported"] == 1
 
+    stats = client.get("/library/stats")
+    assert stats.status_code == 200
+    assert stats.json()["papers_count"] == 1
+    assert stats.json()["bib_entries_count"] == 1
+    assert stats.json()["chunks_count"] >= 1
+
+    health = client.get("/health")
+    assert health.status_code == 200
+    assert health.json()["library"]["papers_count"] == 1
+
     searched = client.get("/library/search", params={"q": "literature review writing"})
     assert searched.status_code == 200
     assert searched.json()["results"][0]["bibtex_key"] == "doe2025copilot"
@@ -70,6 +80,26 @@ def test_api_import_search_read_write_and_cite(tmp_path: Path, monkeypatch) -> N
     cited = client.post("/cite/insert", json={"query": "Academic Copilots", "style": "cite"})
     assert cited.status_code == 200
     assert cited.json()["citation"] == "\\cite{doe2025copilot}"
+
+
+def test_import_task_records_result(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("QUILLPILOT_DATA_DIR", str(tmp_path / "data"))
+    clear_api_caches()
+
+    pdf_dir = tmp_path / "pdfs"
+    pdf_dir.mkdir()
+    make_pdf(pdf_dir / "task2026.pdf", "Task based import should record indexed chunks.")
+
+    client = TestClient(api.create_app())
+
+    created = client.post("/library/import/tasks", json={"pdf_dir": str(pdf_dir)})
+    assert created.status_code == 200
+    task_id = created.json()["task_id"]
+
+    fetched = client.get(f"/library/import/tasks/{task_id}")
+    assert fetched.status_code == 200
+    assert fetched.json()["status"] == "completed"
+    assert fetched.json()["result"]["papers_imported"] == 1
 
 
 def test_settings_round_trip(tmp_path: Path, monkeypatch) -> None:

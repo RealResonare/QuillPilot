@@ -17,6 +17,25 @@ class ImportResponse(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+TaskStatus = Literal["queued", "running", "completed", "failed"]
+
+
+class ImportTaskResponse(BaseModel):
+    task_id: str
+    status: TaskStatus
+    detail: str | None = None
+    result: ImportResponse | None = None
+    warnings: list[str] = Field(default_factory=list)
+
+
+class LibraryStats(BaseModel):
+    papers_count: int
+    bib_entries_count: int
+    chunks_count: int
+    latest_import_at: str | None = None
+    latest_task_status: TaskStatus | None = None
+
+
 class SearchResult(BaseModel):
     paper_id: str
     chunk_id: str | None = None

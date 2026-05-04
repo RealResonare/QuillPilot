@@ -438,7 +438,23 @@ function updateImportChip() {
 async function loadHealth() {
   state.health = await request("/health");
   $("#database-path").textContent = state.health.database || "-";
+  applyLibraryStats(state.health.library);
   updateHealthChip();
+}
+
+function applyLibraryStats(stats) {
+  if (!stats) return;
+  $("#papers-imported").textContent = stats.papers_count ?? 0;
+  $("#bib-imported").textContent = stats.bib_entries_count ?? 0;
+  $("#chunks-indexed").textContent = stats.chunks_count ?? 0;
+  if (stats.latest_task_status === "running" || stats.latest_task_status === "queued") {
+    state.importState = "state.importing";
+  } else if (stats.latest_task_status === "failed") {
+    state.importState = "state.failed";
+  } else {
+    state.importState = "state.ready";
+  }
+  updateImportChip();
 }
 
 function updateSearchCount() {
@@ -488,6 +504,18 @@ async function runSearch(query) {
   renderResults(payload.results || []);
 }
 
+async function waitForImportTask(taskId) {
+  let latest = null;
+  for (let attempt = 0; attempt < 240; attempt += 1) {
+    latest = await request(`/library/import/tasks/${encodeURIComponent(taskId)}`);
+    if (latest.status === "completed" || latest.status === "failed") {
+      return latest;
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, 1000));
+  }
+  return latest;
+}
+
 function escapeHtml(value) {
   return String(value)
     .replaceAll("&", "&amp;")
@@ -495,6 +523,15 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#039;");
+}
+
+function formatSources(sources = []) {
+  if (!sources.length) return "";
+  const lines = sources.map((source, index) => {
+    const key = source.bibtex_key ? ` (${source.bibtex_key})` : "";
+    return `[${index + 1}] ${source.title || "-"}${key}\n${source.snippet || ""}`;
+  });
+  return `\n\n${t("copilot.sources")}:\n${lines.join("\n\n")}`;
 }
 
 function applyGeneralSettings(general) {
@@ -763,13 +800,16 @@ function bindForms() {
     state.importState = "state.importing";
     updateImportChip();
     try {
-      const payload = await request("/library/import", {
+      const task = await request("/library/import/tasks", {
         method: "POST",
         body: JSON.stringify({ pdf_dir: pdfDir || null, bib_file: bibFile || null }),
       });
-      $("#papers-imported").textContent = payload.papers_imported;
-      $("#bib-imported").textContent = payload.bib_entries_imported;
-      $("#chunks-indexed").textContent = payload.chunks_indexed;
+      const finished = await waitForImportTask(task.task_id);
+      if (!finished || finished.status !== "completed") {
+        throw new Error(finished?.warnings?.[0] || "Import task did not complete.");
+      }
+      const payload = finished.result || {};
+      await loadHealth().catch(() => undefined);
       state.importState = "state.ready";
       updateImportChip();
       showToast(payload.warnings?.length ? payload.warnings[0] : t("repository.imported"));
@@ -790,7 +830,7 @@ function bindForms() {
         method: "POST",
         body: JSON.stringify({ question, top_k: Number($("#read-top-k").value || 6) }),
       });
-      $("#read-output").textContent = payload.answer || "-";
+      $("#read-output").textContent = `${payload.answer || "-"}${formatSources(payload.sources)}`;
     } catch (error) {
       $("#read-output").textContent = error.message;
     }
@@ -819,7 +859,7 @@ function bindForms() {
           top_k: 4,
         }),
       });
-      $("#write-output").textContent = payload.result || "-";
+      $("#write-output").textContent = `${payload.result || "-"}${formatSources(payload.sources)}`;
     } catch (error) {
       $("#write-output").textContent = error.message;
     }

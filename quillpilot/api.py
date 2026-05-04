@@ -4,7 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -18,6 +18,8 @@ from .models import (
     CitationResponse,
     ImportRequest,
     ImportResponse,
+    ImportTaskResponse,
+    LibraryStats,
     ReadAskRequest,
     ReadAskResponse,
     SearchResponse,
@@ -72,6 +74,7 @@ def create_app() -> FastAPI:
     def health() -> dict[str, object]:
         config = settings()
         app_settings = settings_service().get()
+        stats = library_service().stats()
         default_provider = next(
             (item for item in app_settings.providers if item.id == app_settings.default_provider_id),
             None,
@@ -82,6 +85,7 @@ def create_app() -> FastAPI:
             "database": str(config.database_path),
             "llm_configured": llm_ready,
             "default_provider": default_provider.name if default_provider else None,
+            "library": stats.model_dump(),
         }
 
     @app.get("/settings", response_model=AppSettings)
@@ -102,6 +106,25 @@ def create_app() -> FastAPI:
             return library_service().import_library(pdf_dir=request.pdf_dir, bib_file=request.bib_file)
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.post("/library/import/tasks", response_model=ImportTaskResponse)
+    def create_import_task(request: ImportRequest, background_tasks: BackgroundTasks) -> ImportTaskResponse:
+        if not request.pdf_dir and not request.bib_file:
+            raise HTTPException(status_code=400, detail="Provide pdf_dir, bib_file, or both.")
+        task = library_service().create_import_task(request)
+        background_tasks.add_task(library_service().run_import_task, task.task_id, request)
+        return task
+
+    @app.get("/library/import/tasks/{task_id}", response_model=ImportTaskResponse)
+    def get_import_task(task_id: str) -> ImportTaskResponse:
+        try:
+            return library_service().get_task(task_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=f"Import task not found: {task_id}") from exc
+
+    @app.get("/library/stats", response_model=LibraryStats)
+    def library_stats() -> LibraryStats:
+        return library_service().stats()
 
     @app.get("/library/search", response_model=SearchResponse)
     def search_library(q: str = Query(..., min_length=1), limit: int = Query(default=10, ge=1, le=50)) -> SearchResponse:

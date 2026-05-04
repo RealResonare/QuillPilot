@@ -72,11 +72,15 @@ def test_import_pdf_bib_search_and_citation(tmp_path: Path) -> None:
 
     response = service.import_library(pdf_dir=str(pdf_dir), bib_file=str(bib))
     results = service.search("ground claims sources", limit=5)
+    stats = service.stats()
     candidates = service.citation_candidates(query="retrieval academic writing")
 
     assert response.papers_imported == 1
     assert response.bib_entries_imported == 1
     assert response.chunks_indexed >= 1
+    assert stats.papers_count == 1
+    assert stats.bib_entries_count == 1
+    assert stats.chunks_count >= 1
     assert results
     assert results[0].bibtex_key == "smith2024retrieval"
     assert candidates[0].bibtex_key == "smith2024retrieval"

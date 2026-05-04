@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import uuid
 from pathlib import Path
@@ -7,7 +8,7 @@ from pathlib import Path
 from .bibtex import BibEntry, parse_bibtex_file
 from .chunking import chunk_text
 from .db import Database
-from .models import CitationCandidate, ImportResponse, SearchResult
+from .models import CitationCandidate, ImportRequest, ImportResponse, ImportTaskResponse, LibraryStats, SearchResult
 from .pdf import extract_pdf_text
 from .search import OptionalChromaIndex, keyword_score, snippet, stable_id
 
@@ -16,6 +17,15 @@ def _normalize(value: str | None) -> str:
     if not value:
         return ""
     return re.sub(r"[^a-z0-9]+", "", value.lower())
+
+
+def _fts_query(value: str) -> str:
+    terms = re.findall(r"[\w-]+", value, flags=re.UNICODE)
+    quoted_terms = []
+    for term in terms:
+        escaped = term.replace('"', '""')
+        quoted_terms.append(f'"{escaped}"')
+    return " OR ".join(quoted_terms)
 
 
 def citation_command(key: str, style: str = "cite") -> str:
@@ -85,6 +95,98 @@ class LibraryService:
             chunks_indexed=chunks_indexed,
             warnings=warnings,
         )
+
+    def create_import_task(self, request: ImportRequest) -> ImportTaskResponse:
+        task_id = str(uuid.uuid4())
+        detail = json.dumps({"pdf_dir": request.pdf_dir, "bib_file": request.bib_file, "result": None, "warnings": []})
+        with self.database.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO tasks (id, kind, status, detail)
+                VALUES (?, 'import', 'queued', ?)
+                """,
+                (task_id, detail),
+            )
+        return self.get_task(task_id)
+
+    def run_import_task(self, task_id: str, request: ImportRequest) -> None:
+        self._update_task(task_id, "running", {"pdf_dir": request.pdf_dir, "bib_file": request.bib_file, "result": None, "warnings": []})
+        try:
+            result = self.import_library(pdf_dir=request.pdf_dir, bib_file=request.bib_file)
+        except Exception as exc:
+            self._update_task(
+                task_id,
+                "failed",
+                {"pdf_dir": request.pdf_dir, "bib_file": request.bib_file, "result": None, "warnings": [str(exc)]},
+            )
+            return
+        self._update_task(
+            task_id,
+            "completed",
+            {
+                "pdf_dir": request.pdf_dir,
+                "bib_file": request.bib_file,
+                "result": result.model_dump(),
+                "warnings": result.warnings,
+            },
+        )
+
+    def get_task(self, task_id: str) -> ImportTaskResponse:
+        with self.database.connect() as conn:
+            row = conn.execute("SELECT id, status, detail FROM tasks WHERE id = ? AND kind = 'import'", (task_id,)).fetchone()
+        if not row:
+            raise KeyError(task_id)
+        detail_payload = json.loads(row["detail"] or "{}")
+        result_payload = detail_payload.get("result")
+        return ImportTaskResponse(
+            task_id=row["id"],
+            status=row["status"],
+            detail=row["detail"],
+            result=ImportResponse.model_validate(result_payload) if result_payload else None,
+            warnings=list(detail_payload.get("warnings") or []),
+        )
+
+    def stats(self) -> LibraryStats:
+        with self.database.connect() as conn:
+            papers_count = conn.execute("SELECT COUNT(*) FROM papers").fetchone()[0]
+            bib_entries_count = conn.execute("SELECT COUNT(*) FROM bib_entries").fetchone()[0]
+            chunks_count = conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
+            latest_task = conn.execute(
+                """
+                SELECT status, updated_at
+                FROM tasks
+                WHERE kind = 'import'
+                ORDER BY updated_at DESC
+                LIMIT 1
+                """
+            ).fetchone()
+            latest_completed = conn.execute(
+                """
+                SELECT updated_at
+                FROM tasks
+                WHERE kind = 'import' AND status = 'completed'
+                ORDER BY updated_at DESC
+                LIMIT 1
+                """
+            ).fetchone()
+        return LibraryStats(
+            papers_count=papers_count,
+            bib_entries_count=bib_entries_count,
+            chunks_count=chunks_count,
+            latest_import_at=latest_completed["updated_at"] if latest_completed else None,
+            latest_task_status=latest_task["status"] if latest_task else None,
+        )
+
+    def _update_task(self, task_id: str, status: str, detail: dict[str, object]) -> None:
+        with self.database.connect() as conn:
+            conn.execute(
+                """
+                UPDATE tasks
+                SET status = ?, detail = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (status, json.dumps(detail), task_id),
+            )
 
     def _upsert_bib_entries(self, entries: list[BibEntry]) -> None:
         with self.database.connect() as conn:
@@ -186,6 +288,55 @@ class LibraryService:
         return len(rows_for_vector)
 
     def search(self, query: str, limit: int = 10, paper_ids: list[str] | None = None) -> list[SearchResult]:
+        fts_results = self._search_fts(query, limit, paper_ids)
+        if fts_results:
+            return fts_results
+
+        return self._search_keywords(query, limit, paper_ids)
+
+    def _search_fts(self, query: str, limit: int, paper_ids: list[str] | None = None) -> list[SearchResult]:
+        match_query = _fts_query(query)
+        if not match_query:
+            return []
+        params: list[object] = []
+        paper_filter = ""
+        if paper_ids:
+            paper_filter = " AND p.id IN (%s)" % ",".join("?" for _ in paper_ids)
+            params.extend(paper_ids)
+
+        with self.database.connect() as conn:
+            try:
+                rows = conn.execute(
+                    f"""
+                    SELECT chunks_fts.chunk_id, p.id AS paper_id, p.title, p.authors, p.year, p.bibtex_key, c.text,
+                           bm25(chunks_fts) AS rank
+                    FROM chunks_fts
+                    JOIN chunks c ON c.id = chunks_fts.chunk_id
+                    JOIN papers p ON p.id = chunks_fts.paper_id
+                    WHERE chunks_fts MATCH ? {paper_filter}
+                    ORDER BY rank
+                    LIMIT ?
+                    """,
+                    [match_query, *params, limit],
+                ).fetchall()
+            except Exception:
+                return []
+
+        return [
+            SearchResult(
+                paper_id=row["paper_id"],
+                chunk_id=row["chunk_id"],
+                title=row["title"],
+                authors=row["authors"],
+                year=row["year"],
+                bibtex_key=row["bibtex_key"],
+                snippet=snippet(row["text"], query),
+                score=round(1 / (1 + max(float(row["rank"]), 0.0)), 4),
+            )
+            for row in rows
+        ]
+
+    def _search_keywords(self, query: str, limit: int = 10, paper_ids: list[str] | None = None) -> list[SearchResult]:
         params: list[object] = []
         paper_filter = ""
         if paper_ids:
