@@ -19,6 +19,8 @@ def extract_pdf_text(path: Path | str) -> ExtractedPdf:
     parts: list[str] = []
     with fitz.open(pdf_path) as document:
         metadata_title = (document.metadata or {}).get("title") or ""
+        if metadata_title.strip().lower() in {"untitled", "unknown"}:
+            metadata_title = ""
         for page in document:
             parts.append(page.get_text("text"))
         title_hint = metadata_title.strip() or pdf_path.stem.replace("_", " ").replace("-", " ")

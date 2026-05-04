@@ -85,3 +85,63 @@ def test_import_pdf_bib_search_and_citation(tmp_path: Path) -> None:
     assert results[0].bibtex_key == "smith2024retrieval"
     assert candidates[0].bibtex_key == "smith2024retrieval"
     assert citation_command(candidates[0].bibtex_key, "citep") == "\\citep{smith2024retrieval}"
+
+
+def test_import_deduplicates_papers_by_bibtex_key_doi_and_title(tmp_path: Path) -> None:
+    service = LibraryService(Database(tmp_path / "quillpilot.sqlite3"))
+
+    bib = tmp_path / "refs.bib"
+    bib.write_text(
+        """
+@article{dup2024one,
+  title={Duplicate Aware Citation Imports},
+  author={Smith, Ada},
+  year={2024},
+  doi={10.1234/dup}
+}
+
+@article{dup2024two,
+  title={Duplicate Aware Citation Imports Revised},
+  author={Smith, Ada},
+  year={2024},
+  doi={10.1234/dup}
+}
+""".strip(),
+        encoding="utf-8",
+    )
+
+    first_dir = tmp_path / "first"
+    second_dir = tmp_path / "second"
+    third_dir = tmp_path / "third"
+    for directory in (first_dir, second_dir, third_dir):
+        directory.mkdir()
+
+    make_pdf(first_dir / "dup2024one.pdf", "First import text about duplicate aware citations.")
+    make_pdf(second_dir / "dup2024one.pdf", "Second import text with the same BibTeX key.")
+    make_pdf(third_dir / "dup2024two.pdf", "Third import text with the same DOI.")
+
+    first = service.import_library(pdf_dir=str(first_dir), bib_file=str(bib))
+    same_key = service.import_library(pdf_dir=str(second_dir), bib_file=str(bib))
+    same_doi = service.import_library(pdf_dir=str(third_dir), bib_file=str(bib))
+    stats = service.stats()
+
+    assert first.papers_imported == 1
+    assert same_key.papers_imported == 1
+    assert same_doi.papers_imported == 1
+    assert stats.papers_count == 1
+    assert any("BibTeX key" in warning for warning in same_key.warnings)
+    assert any("DOI" in warning for warning in same_doi.warnings)
+
+    title_service = LibraryService(Database(tmp_path / "title.sqlite3"))
+    title_first_dir = tmp_path / "title-first"
+    title_second_dir = tmp_path / "title-second"
+    title_first_dir.mkdir()
+    title_second_dir.mkdir()
+    make_pdf(title_first_dir / "same-title-paper.pdf", "First import text with title dedupe.")
+    make_pdf(title_second_dir / "same-title-paper.pdf", "Second import text with title dedupe.")
+
+    title_service.import_library(pdf_dir=str(title_first_dir))
+    same_title = title_service.import_library(pdf_dir=str(title_second_dir))
+
+    assert title_service.stats().papers_count == 1
+    assert any("title" in warning for warning in same_title.warnings)

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 
 from .bibtex import BibEntry, parse_bibtex_file
@@ -67,6 +68,12 @@ def citation_rank(query: str | None, candidate: CitationCandidate) -> tuple[floa
     return 0.0, "No match"
 
 
+@dataclass(frozen=True)
+class UpsertPaperResult:
+    paper_id: str
+    duplicate_reason: str | None = None
+
+
 class LibraryService:
     def __init__(self, database: Database, vector_index: OptionalChromaIndex | None = None):
         self.database = database
@@ -102,7 +109,7 @@ class LibraryService:
                 continue
 
             bib = self._match_bib_entry(pdf_path, extracted.title_hint)
-            paper_id = self._upsert_paper(
+            upserted = self._upsert_paper(
                 title=bib.title if bib and bib.title else extracted.title_hint,
                 authors=bib.authors if bib else None,
                 year=bib.year if bib else None,
@@ -110,9 +117,11 @@ class LibraryService:
                 pdf_path=pdf_path,
                 doi=bib.doi if bib else None,
             )
+            if upserted.duplicate_reason:
+                warnings.append(f"{pdf_path.name}: matched existing paper by {upserted.duplicate_reason}")
             chunks = chunk_text(extracted.text)
             chunks_indexed += self._replace_chunks(
-                paper_id=paper_id,
+                paper_id=upserted.paper_id,
                 title=bib.title if bib and bib.title else extracted.title_hint,
                 authors=bib.authors if bib else None,
                 bibtex_key=bib.key if bib else None,
@@ -260,28 +269,50 @@ class LibraryService:
         bibtex_key: str | None,
         pdf_path: Path,
         doi: str | None,
-    ) -> str:
+    ) -> UpsertPaperResult:
         existing_id: str | None = None
+        duplicate_reason: str | None = None
+        resolved_pdf_path = str(pdf_path.resolve())
         with self.database.connect() as conn:
-            row = conn.execute("SELECT id FROM papers WHERE pdf_path = ?", (str(pdf_path.resolve()),)).fetchone()
+            row = conn.execute("SELECT id FROM papers WHERE pdf_path = ?", (resolved_pdf_path,)).fetchone()
             if row:
                 existing_id = row["id"]
+            if not existing_id and bibtex_key:
+                row = conn.execute("SELECT id FROM papers WHERE bibtex_key = ?", (bibtex_key,)).fetchone()
+                if row:
+                    existing_id = row["id"]
+                    duplicate_reason = "BibTeX key"
+            if not existing_id and doi:
+                row = conn.execute("SELECT id FROM papers WHERE doi = ?", (doi,)).fetchone()
+                if row:
+                    existing_id = row["id"]
+                    duplicate_reason = "DOI"
+            if not existing_id:
+                title_norm = _normalize(title)
+                if len(title_norm) >= 12:
+                    rows = conn.execute("SELECT id, title FROM papers").fetchall()
+                    for paper_row in rows:
+                        if _normalize(paper_row["title"]) == title_norm:
+                            existing_id = paper_row["id"]
+                            duplicate_reason = "title"
+                            break
             paper_id = existing_id or str(uuid.uuid4())
             conn.execute(
                 """
                 INSERT INTO papers (id, title, authors, year, bibtex_key, pdf_path, doi)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(pdf_path) DO UPDATE SET
+                ON CONFLICT(id) DO UPDATE SET
                   title=excluded.title,
                   authors=excluded.authors,
                   year=excluded.year,
                   bibtex_key=excluded.bibtex_key,
+                  pdf_path=excluded.pdf_path,
                   doi=excluded.doi,
                   updated_at=CURRENT_TIMESTAMP
                 """,
-                (paper_id, title, authors, year, bibtex_key, str(pdf_path.resolve()), doi),
+                (paper_id, title, authors, year, bibtex_key, resolved_pdf_path, doi),
             )
-            return paper_id
+            return UpsertPaperResult(paper_id=paper_id, duplicate_reason=duplicate_reason)
 
     def _replace_chunks(self, paper_id: str, title: str, authors: str | None, bibtex_key: str | None, chunks) -> int:
         rows_for_vector: list[dict[str, str]] = []
